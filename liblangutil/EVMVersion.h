@@ -22,12 +22,13 @@
 #pragma once
 
 #include <libsolutil/Assertions.h>
+#include <liblangutil//Exceptions.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
-
 
 namespace solidity::evmasm
 {
@@ -63,6 +64,7 @@ public:
 	static EVMVersion constexpr cancun() { return {Version::Cancun}; }
 	static EVMVersion constexpr prague() { return {Version::Prague}; }
 	static EVMVersion constexpr osaka() { return {Version::Osaka}; }
+	static EVMVersion constexpr future() { return {Version::Future}; }
 
 	static auto constexpr allVersions() {
 		return std::array{
@@ -80,14 +82,7 @@ public:
 			cancun(),
 			prague(),
 			osaka(),
-		};
-	}
-
-	static auto constexpr allEOFVersions()
-	{
-		return std::array{
-			std::optional<uint8_t>(),
-			std::make_optional<uint8_t>(1)
+			future(),
 		};
 	}
 
@@ -99,9 +94,8 @@ public:
 		return std::nullopt;
 	}
 
-	static EVMVersion firstWithEOF() { return {Version::Osaka}; }
-
 	bool isExperimental() const {
+		solAssert(Version::Future > currentVersion);
 		return m_version > currentVersion;
 	}
 
@@ -125,6 +119,7 @@ public:
 		case Version::Cancun: return "cancun";
 		case Version::Prague: return "prague";
 		case Version::Osaka: return "osaka";
+		case Version::Future: return "@future";
 		}
 		util::unreachable();
 	}
@@ -145,9 +140,9 @@ public:
 	bool hasBlobHash() const { return *this >= cancun(); }
 	bool hasMcopy() const { return *this >= cancun(); }
 	bool supportsTransientStorage() const { return *this >= cancun(); }
-	bool supportsEOF() const { return *this >= firstWithEOF(); }
+	constexpr size_t reachableStackDepth() const { return 16; }
 
-	bool hasOpcode(evmasm::Instruction _opcode, std::optional<uint8_t> _eofVersion) const;
+	bool hasOpcode(evmasm::Instruction _opcode) const;
 
 	/// Whether we have to retain the costs for the call opcode itself (false),
 	/// or whether we can just forward easily all remaining gas (true).
@@ -169,6 +164,7 @@ private:
 		Cancun,
 		Prague,
 		Osaka,
+		Future,
 	};
 	static auto constexpr currentVersion = Version::Osaka;
 

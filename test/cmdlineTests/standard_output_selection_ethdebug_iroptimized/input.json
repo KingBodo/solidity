@@ -9,12 +9,14 @@
     }
   },
   "settings": {
+    "experimental": true,
     "viaIR": true,
     "outputSelection": {
       "*": {
         "*": [
           "evm.bytecode.ethdebug",
-          "irOptimized"
+          "irOptimized",
+          "ethdebug.resources"
         ]
       }
     }

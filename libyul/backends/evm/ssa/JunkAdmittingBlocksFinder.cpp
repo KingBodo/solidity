@@ -23,7 +23,7 @@
 namespace solidity::yul::ssa
 {
 
-JunkAdmittingBlocksFinder::JunkAdmittingBlocksFinder(SSACFG const& _cfg, ForwardSSACFGTopologicalSort const& _topologicalSort):
+JunkAdmittingBlocksFinder::JunkAdmittingBlocksFinder(SSACFG const& _cfg, traversal::ForwardTopologicalSort const& _topologicalSort):
 	m_blockAllowsJunk(_cfg.numBlocks(), false)
 {
 	// special case: only one block here, we mark it as junkable in case it's not a function return
@@ -45,7 +45,8 @@ JunkAdmittingBlocksFinder::JunkAdmittingBlocksFinder(SSACFG const& _cfg, Forward
 	for (auto const blockIndex: _topologicalSort.preOrder())
 	{
 		SSACFG::BlockId const blockId {blockIndex};
-		m_blockAllowsJunk[blockIndex] = bridgeFinder.bridgeVertex(blockId) || _cfg.block(blockId).isTerminationBlock();
+		bool const isLoopHead = _topologicalSort.backEdgeTargets().contains(blockIndex);
+		m_blockAllowsJunk[blockIndex] = (bridgeFinder.bridgeVertex(blockId) && !isLoopHead) || _cfg.block(blockId).isTerminationBlock();
 		if (_cfg.block(blockId).isFunctionReturnBlock())
 			toVisit.emplace_back(SSACFG::BlockId{blockIndex});
 	}

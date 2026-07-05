@@ -62,17 +62,16 @@ class CompilerContext
 public:
 	explicit CompilerContext(
 		langutil::EVMVersion _evmVersion,
-		std::optional<uint8_t> _eofVersion,
 		RevertStrings _revertStrings,
 		CompilerContext* _runtimeContext = nullptr
 	):
-		m_asm(std::make_shared<evmasm::Assembly>(_evmVersion, _runtimeContext != nullptr, std::nullopt, std::string{})),
+		m_asm(std::make_shared<evmasm::Assembly>(_evmVersion, _runtimeContext != nullptr, std::string{})),
 		m_evmVersion(_evmVersion),
 		m_revertStrings(_revertStrings),
 		m_reservedMemory{0},
 		m_runtimeContext(_runtimeContext),
-		m_abiFunctions(m_evmVersion, _eofVersion, m_revertStrings, m_yulFunctionCollector),
-		m_yulUtilFunctions(m_evmVersion, _eofVersion, m_revertStrings, m_yulFunctionCollector)
+		m_abiFunctions(m_evmVersion, m_revertStrings, m_yulFunctionCollector),
+		m_yulUtilFunctions(m_evmVersion, m_revertStrings, m_yulFunctionCollector)
 	{
 		if (m_runtimeContext)
 			m_runtimeSub = evmasm::SubAssemblyID{m_asm->newSub(m_runtimeContext->m_asm).data()};
@@ -108,6 +107,7 @@ public:
 	void setStackOffset(int _offset) { m_asm->setDeposit(_offset); }
 	void adjustStackOffset(int _adjustment) { m_asm->adjustDeposit(_adjustment); }
 	unsigned stackHeight() const { solAssert(m_asm->deposit() >= 0, ""); return unsigned(m_asm->deposit()); }
+	size_t reachableStackDepth() const { return m_evmVersion.reachableStackDepth(); }
 
 	bool isLocalVariable(Declaration const* _declaration) const;
 	bool isStateVariable(Declaration const* _declaration) const { return m_stateVariables.count(_declaration) != 0; }
@@ -374,7 +374,7 @@ private:
 	/// Stack of current visited AST nodes, used for location attachment
 	std::stack<ASTNode const*> m_visitedNodes;
 	/// The runtime context if in Creation mode, this is used for generating tags that would be stored into the storage and then used at runtime.
-	CompilerContext *m_runtimeContext;
+	CompilerContext* m_runtimeContext;
 	/// The index of the runtime subroutine.
 	evmasm::SubAssemblyID m_runtimeSub{};
 	/// An index of low-level function labels by name.

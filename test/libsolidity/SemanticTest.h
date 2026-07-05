@@ -60,7 +60,6 @@ public:
 		return std::make_unique<SemanticTest>(
 			_options.filename,
 			_options.evmVersion,
-			_options.eofVersion,
 			_options.vmPaths,
 			_options.enforceGasCost,
 			_options.enforceGasCostMinValue
@@ -70,7 +69,6 @@ public:
 	explicit SemanticTest(
 		std::string const& _filename,
 		langutil::EVMVersion _evmVersion,
-		std::optional<uint8_t> _eofVersion,
 		std::vector<boost::filesystem::path> const& _vmPaths,
 		bool _enforceGasCost = false,
 		u256 _enforceGasCostMinValue = 100000
@@ -96,12 +94,14 @@ private:
 		std::ostream& _stream,
 		std::string const& _linePrefix,
 		bool _formatted,
-		bool _isYulRun
+		bool _isYulRun,
+		bool _isSSACFGRun = false
 	);
 	TestResult tryRunTestWithYulOptimizer(
 		std::ostream& _stream,
 		std::string const& _linePrefix,
-		bool _formatted
+		bool _formatted,
+		bool _isSSACFGRun = false
 	);
 	bool checkGasCostExpectation(TestFunctionCall& io_test, bool _compileViaYul) const;
 	std::map<std::string, Builtin> makeBuiltins();
@@ -119,6 +119,8 @@ private:
 	std::vector<SideEffectHook> const m_sideEffectHooks;
 	bool m_testCaseWantsYulRun = true;
 	bool m_testCaseWantsLegacyRun = true;
+	bool m_testCaseWantsSSACFGRun = false;
+	bool m_isSSACFGRun = false;
 	bool m_runWithABIEncoderV1Only = false;
 	bool m_allowNonExistingFunctions = false;
 	bool m_gasCostFailure = false;

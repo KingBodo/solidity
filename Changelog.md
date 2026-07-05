@@ -1,11 +1,52 @@
-### 0.8.34 (unreleased)
+### 0.8.36 (unreleased)
 
 Language Features:
 
 Compiler Features:
-* Yul Optimizer: Remove redundant prerequisite steps from the default optimizer sequence.
+* Commandline Interface: `--optimize-runs` now also accepts values from the interval [INT64_MAX, UINT64_MAX].
+* General: Speed up SHA-256 hashing (`picosha2`).
+* General: Remove support for the experimental EOF (EVM Object Format) backend.
 
 Bugfixes:
+* NatSpec: Disallow `@return` tag in event documentation.
+* SMTChecker: Fix incorrect handling of constant operands of unary operations.
+* Standard JSON Interface: Fix incorrect serialization of `optimizer.runs` setting for values in the interval [INT64_MAX, UINT64_MAX].
+
+
+### 0.8.35 (2026-04-29)
+
+Language Features:
+* General: Add a builtin that computes the base slot of a storage namespace using the `erc7201` formula from ERC-7201.
+* Name Resolver: Warn about identifiers selected for future promotion to Solidity or Yul keywords (`at`, `error`, `layout`, `leave`, `super`, `transient`, `this`).
+* Yul Analyzer: Warn about identifiers selected for future promotion to Yul keywords and reserved identifiers (`basefee`, `blobbasefee`, `blobhash`, `clz`, `leave`, `memoryguard`, `mcopy`, `prevrandao`, `tload`, `tstore`).
+
+Compiler Features:
+* Commandline Interface: Disallow selecting the deprecated assembly input mode that was only accessible via `--assemble` instead of treating it as equivalent to `--strict-assembly`.
+* Commandline Interface: Introduce `--experimental` flag required for enabling the experimental mode.
+* Commandline Interface: Replace the experimental `--ethdebug` and `--ethdebug-runtime` outputs with the more granular `--ethdebug-resources`, `--ethdebug-compilation`, `--ethdebug-program` and `--ethdebug-program-runtime`. Producing `ethdebug/format/info/resources` no longer forces full binary compilation.
+* EVM: Introduce experimental EVM version `@future`.
+* General: Improve performance of sanity checks throughout the compiler implementation.
+* General: Introduce the SSA CFG codegen (experimental).
+* General: Restrict the existing experimental features (`generic-solidity`, `lsp`, `ethdebug`, `eof`, `evm`, `ast-import`, `evmasm-import`, `ir-ast`, `ssa-cfg`) to experimental mode.
+* Metadata: Store the state of the experimental mode in JSON and CBOR metadata. In CBOR this broadens the meaning of the existing `experimental` field, which used to indicate only the presence of certain experimental pragmas in the source.
+* Standard JSON Interface: Introduce `settings.experimental` setting required for enabling the experimental mode.
+* Standard JSON Interface: Replace the experimental top-level `ethdebug` output with `ethdebug.resources` and `ethdebug.compilation`. Decouple ethdebug outputs from binary compilation so that requesting the `ethdebug/format/info/resources` schema artifacts does not trigger bytecode generation.
+* Yul Optimizer: Improve performance of control flow side effects collector and function references resolver.
+
+Bugfixes:
+* Yul: Fix incorrect serialization of Yul object names containing double quotes and escape sequences, producing output that could not be parsed as valid Yul.
+* Yul EVM Code Transform: Improve stack shuffler performance by fixing a BFS deduplication issue.
+* Yul IR Code Generation: Preserve custom error argument of `require` when stripping of revert strings is selected via `--revert-strings strip`.
+
+
+### 0.8.34 (2026-02-18)
+
+Important Bugfixes:
+* Yul IR Code Generation: Fix a bug that could result in clearing a storage variable instead of a transient storage variable at the same position in the layout (and vice-versa).
+
+
+Compiler Features:
+* Yul Optimizer: Remove redundant prerequisite steps from the default optimizer sequence.
 
 
 ### 0.8.33 (2025-12-18)

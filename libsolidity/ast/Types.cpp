@@ -403,9 +403,7 @@ std::set<FunctionDefinition const*, ASTNode::CompareByID> Type::operatorDefiniti
 			auto const& functionDefinition = dynamic_cast<FunctionDefinition const&>(
 				*identifierPath->annotation().referencedDeclaration
 			);
-			auto const* functionType = dynamic_cast<FunctionType const*>(
-				functionDefinition.libraryFunction() ? functionDefinition.typeViaContractName() : functionDefinition.type()
-			);
+			auto const* functionType = dynamic_cast<FunctionType const*>(functionDefinition.typeWhenAttached());
 			solAssert(functionType && !functionType->parameterTypes().empty());
 
 			size_t parameterCount = functionDefinition.parameterList().parameters().size();
@@ -425,8 +423,7 @@ MemberList::MemberMap Type::attachedFunctions(Type const& _type, ASTNode const& 
 	{
 		if (!_name)
 			_name = _function.name();
-		Type const* functionType =
-			_function.libraryFunction() ? _function.typeViaContractName() : _function.type();
+		Type const* functionType = _function.typeWhenAttached();
 		solAssert(functionType, "");
 		FunctionType const* withBoundFirstArgument =
 			dynamic_cast<FunctionType const&>(*functionType).withBoundFirstArgument();
@@ -3125,6 +3122,7 @@ std::string FunctionType::richIdentifier() const
 	case Kind::ABIDecode: id += "abidecode"; break;
 	case Kind::BlobHash: id += "blobhash"; break;
 	case Kind::MetaType: id += "metatype"; break;
+	case Kind::ERC7201: id += "erc7201"; break;
 	}
 	id += "_" + stateMutabilityToString(m_stateMutability);
 	id += identifierList(m_parameterTypes) + "returns" + identifierList(m_returnParameterTypes);
@@ -3474,7 +3472,7 @@ MemberList::MemberMap FunctionType::nativeMembers(ASTNode const* _scope) const
 		if (auto const* functionDefinition = dynamic_cast<FunctionDefinition const*>(m_declaration))
 		{
 			solAssert(functionDefinition->visibility() > Visibility::Internal, "");
-			auto const *contract = dynamic_cast<ContractDefinition const*>(m_declaration->scope());
+			auto const* contract = dynamic_cast<ContractDefinition const*>(m_declaration->scope());
 			solAssert(contract, "");
 			solAssert(contract->isLibrary(), "");
 			return {{"selector", TypeProvider::fixedBytes(4)}};
@@ -3715,7 +3713,8 @@ bool FunctionType::isPure() const
 		m_kind == Kind::Wrap ||
 		m_kind == Kind::Unwrap ||
 		m_kind == Kind::BytesConcat ||
-		m_kind == Kind::StringConcat;
+		m_kind == Kind::StringConcat ||
+		m_kind == Kind::ERC7201;
 }
 
 TypePointers FunctionType::parseElementaryTypeVector(strings const& _types)
@@ -3976,21 +3975,38 @@ MemberList::MemberMap TypeType::nativeMembers(ASTNode const* _currentScope) cons
 				if (declaration->name().empty())
 					continue;
 
-				if (!contract.isLibrary() && inDerivingScope && declaration->isVisibleInDerivedContracts())
+				if (!contract.isLibrary())
 				{
-					if (
-						auto const* functionDefinition = dynamic_cast<FunctionDefinition const*>(declaration);
-						functionDefinition && !functionDefinition->isImplemented()
-					)
-						members.emplace_back(declaration, declaration->typeViaContractName());
-					else
-						members.emplace_back(declaration, declaration->type());
+					if (inDerivingScope)
+					{
+						if (declaration->isVisibleViaContractName(Declaration::ContractNameAccessKind::Local))
+						{
+							members.emplace_back(
+								declaration,
+								declaration->typeViaContractName(Declaration::ContractNameAccessKind::Local));
+						}
+					}
+					else // !inDerivingScope
+					{
+						if (declaration->isVisibleViaContractName(Declaration::ContractNameAccessKind::Foreign))
+						{
+							members.emplace_back(
+								declaration,
+								declaration->typeViaContractName(Declaration::ContractNameAccessKind::Foreign)
+							);
+						}
+					}
 				}
-				else if (
-					(contract.isLibrary() && declaration->isVisibleAsLibraryMember()) ||
-					declaration->isVisibleViaContractTypeAccess()
-				)
-					members.emplace_back(declaration, declaration->typeViaContractName());
+				else // isLibrary
+				{
+					if (declaration->isVisibleViaContractName(Declaration::ContractNameAccessKind::Library))
+					{
+						members.emplace_back(
+							declaration,
+							declaration->typeViaContractName(Declaration::ContractNameAccessKind::Library)
+						);
+					}
+				}
 			}
 		}
 	}

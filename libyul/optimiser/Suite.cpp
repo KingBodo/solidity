@@ -94,7 +94,7 @@ void OptimiserSuite::run(
 	bool _optimizeStackAllocation,
 	std::string_view _optimisationSequence,
 	std::string_view _optimisationCleanupSequence,
-	std::optional<size_t> _expectedExecutionsPerDeployment,
+	std::optional<std::uint64_t> _expectedExecutionsPerDeployment,
 	std::set<YulName> const& _externallyUsedIdentifiers
 )
 {
@@ -163,29 +163,25 @@ void OptimiserSuite::run(
 		}
 		if (usesOptimizedCodeGenerator)
 		{
-			if (!evmDialect->eofVersion().has_value())
 			{
-				{
-					PROFILER_PROBE("StackCompressor", probe);
-					_object.setCode(std::make_shared<AST>(dialect, std::move(astRoot)));
-					astRoot = std::get<1>(StackCompressor::run(
-						_object,
-						_optimizeStackAllocation,
-						stackCompressorMaxIterations
-					));
-				}
-				if (evmDialect->providesObjectAccess())
-				{
-					PROFILER_PROBE("StackLimitEvader", probe);
-					_object.setCode(std::make_shared<AST>(dialect, std::move(astRoot)));
-					astRoot = StackLimitEvader::run(suite.m_context, _object);
-				}
+				PROFILER_PROBE("StackCompressor", probe);
+				_object.setCode(std::make_shared<AST>(dialect, std::move(astRoot)));
+				astRoot = std::get<1>(StackCompressor::run(
+					_object,
+					_optimizeStackAllocation,
+					stackCompressorMaxIterations
+				));
+			}
+			if (evmDialect->providesObjectAccess())
+			{
+				PROFILER_PROBE("StackLimitEvader", probe);
+				_object.setCode(std::make_shared<AST>(dialect, std::move(astRoot)));
+				astRoot = StackLimitEvader::run(suite.m_context, _object);
 			}
 		}
 		else if (evmDialect->providesObjectAccess() && _optimizeStackAllocation)
 		{
 			PROFILER_PROBE("StackLimitEvader", probe);
-			yulAssert(!evmDialect->eofVersion().has_value(), "");
 			_object.setCode(std::make_shared<AST>(dialect, std::move(astRoot)));
 			astRoot = StackLimitEvader::run(suite.m_context, _object);
 		}

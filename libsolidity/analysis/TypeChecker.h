@@ -47,9 +47,8 @@ class TypeChecker: private ASTConstVisitor
 {
 public:
 	/// @param _errorReporter provides the error logging functionality.
-	TypeChecker(langutil::EVMVersion _evmVersion, std::optional<uint8_t> _eofVersion, langutil::ErrorReporter& _errorReporter):
+	TypeChecker(langutil::EVMVersion _evmVersion, langutil::ErrorReporter& _errorReporter):
 		m_evmVersion(_evmVersion),
-		m_eofVersion(_eofVersion),
 		m_errorReporter(_errorReporter)
 	{}
 
@@ -116,6 +115,8 @@ private:
 		FunctionCall const& _functionCall,
 		FunctionType const* _functionType
 	);
+
+	void typeCheckERC7201Builtin(FunctionCall const& _functionCall, FunctionType const* _functionType);
 
 	bool visit(ImportDirective const&) override;
 
@@ -189,11 +190,33 @@ private:
 			return m_currentSourceUnit;
 	}
 
+	// MemberAccess visitor helpers:
+
+	/// Resolves overloaded functions by filtering out inapplicable candidates based on the provided arguments
+	/// and the type of the owning object.
+	/// Reports an error in case of ambiguity or failure to resolve.
+	MemberList::Member resolveOverloads(MemberAccess const& _memberAccess) const;
+
+	/// Uses heuristics to determine the cause of unresolved member access and
+	/// produce a more specific and helpful error.
+	/// @param _memberAccess The member access expression where the unresolved member access occurred.
+	/// @param _possibleMemberCountBeforeOverloading The initial count of possible members before overloading resolution.
+	/// @returns error ID and error message.
+	std::pair<langutil::ErrorId, std::string> diagnoseUnresolvedMemberAccess(
+		MemberAccess const& _memberAccess,
+		size_t _possibleMemberCountBeforeOverloading
+	) const;
+
+	/// Validates access to a member function of a given type, ensuring that the invocation
+	/// is consistent with the expected types and semantics. Reports errors and warnings
+	/// for invalid access, use of deprecated features, and unsupported operations.
+	/// @param _memberAccess Member access expression.
+	void checkAccessedMemberFunction(MemberAccess const& _memberAccess) const;
+
 	SourceUnit const* m_currentSourceUnit = nullptr;
 	ContractDefinition const* m_currentContract = nullptr;
 
 	langutil::EVMVersion m_evmVersion;
-	std::optional<uint8_t> m_eofVersion;
 
 	langutil::ErrorReporter& m_errorReporter;
 };

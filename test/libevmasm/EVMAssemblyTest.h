@@ -38,7 +38,6 @@ namespace solidity::evmasm::test
 ///
 /// Available settings:
 /// - EVMVersion: The range of EVM versions to run the test for. Inherited from EVMVersionRestrictedTestCase.
-/// - bytecodeFormat: The range of bytecode formats (EOF/legacy) to run the test for. Inherited from EVMVersionRestrictedTestCase.
 /// - outputs: List of outputs to include in the test. The order of values does NOT determine the order
 ///     in which the outputs are printed. Supported outputs: InputAssemblyJSON, Assembly, Bytecode, Opcodes, SourceMappings.
 ///     The default is to print all outputs except InputAssemblyJSON.
@@ -75,6 +74,7 @@ private:
 	AssemblyFormat m_assemblyFormat{};
 	std::string m_selectedOutputs;
 	evmasm::Assembly::OptimiserSettings m_optimizerSettings;
+	bool m_usingDefaultExpectedExecutionsPerDeployment{};
 };
 
 }

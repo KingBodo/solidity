@@ -69,6 +69,11 @@ namespace solidity::evmasm
 class Assembly;
 class AssemblyItem;
 using AssemblyItems = std::vector<AssemblyItem>;
+
+namespace ethdebug
+{
+struct Source;
+}
 }
 
 namespace solidity::yul
@@ -160,6 +165,11 @@ public:
 			return bytecode;
 		}
 
+		bool needsFullCompilation() const
+		{
+			return irCodegen || irOptimization || bytecode;
+		}
+
 		PipelineConfig operator|(PipelineConfig const& _other) const
 		{
 			return {
@@ -210,7 +220,7 @@ public:
 
 	/// Changes the optimiser settings.
 	/// Must be set before parsing.
-	void setOptimiserSettings(bool _optimize, size_t _runs = OptimiserSettings{}.expectedExecutionsPerDeployment);
+	void setOptimiserSettings(bool _optimize, OptimiserSettings::ExecutionCount _runs = OptimiserSettings{}.expectedExecutionsPerDeployment);
 
 	/// Changes the optimiser settings.
 	/// Must be set before parsing.
@@ -223,14 +233,17 @@ public:
 	/// Must be set before parsing.
 	void setViaIR(bool _viaIR);
 
+	/// Sets the pipeline to use the SSA CFG code generator instead of OptimizedEVMCodeTransform.
+	/// Must be set before compilation.
+	void setViaSSACFG(bool _viaSSACFG);
+
+	/// Sets the experimental toggle to allow usage of experimental features.
+	void setExperimental(bool _experimental);
+
 	/// Set the EVM version used before running compile.
 	/// When called without an argument it will revert to the default version.
 	/// Must be set before parsing.
 	void setEVMVersion(langutil::EVMVersion _version = langutil::EVMVersion{});
-
-	/// Set the EOF version used before running compile.
-	/// If set to std::nullopt (the default), legacy non-EOF bytecode is generated.
-	void setEOFVersion(std::optional<uint8_t> version);
 
 	/// Set model checker settings.
 	void setModelCheckerSettings(ModelCheckerSettings _settings);
@@ -403,6 +416,9 @@ public:
 	/// Prerequisite: Successful call to parse or compile.
 	Json ethdebug() const override;
 
+	/// @returns a JSON representing the ethdebug compilation data (compiler name and version).
+	Json ethdebugCompilation() const override;
+
 	/// @returns the Contract Metadata matching the pipeline selected using the viaIR setting.
 	std::string const& metadata(std::string const& _contractName) const { return metadata(contract(_contractName)); }
 
@@ -445,6 +461,8 @@ private:
 		util::h256 const& swarmHash() const;
 		std::string const& ipfsUrl() const;
 	};
+
+	std::vector<evmasm::ethdebug::Source> ethdebugSources() const;
 
 	/// The state per contract. Filled gradually during compilation.
 	struct Contract
@@ -607,8 +625,9 @@ private:
 	RevertStrings m_revertStrings = RevertStrings::Default;
 	State m_stopAfter = State::CompilationSuccessful;
 	bool m_viaIR = false;
+	bool m_viaSSACFG = false;
+	bool m_experimental = false;
 	langutil::EVMVersion m_evmVersion;
-	std::optional<uint8_t> m_eofVersion;
 	ModelCheckerSettings m_modelCheckerSettings;
 	ContractSelection m_selectedContracts;
 	std::map<std::string, util::h160> m_libraries;

@@ -59,12 +59,11 @@ std::ostream& solidity::frontend::test::operator<<(std::ostream& _output, Requir
 SemanticTest::SemanticTest(
 	std::string const& _filename,
 	langutil::EVMVersion _evmVersion,
-	std::optional<uint8_t> _eofVersion,
 	std::vector<boost::filesystem::path> const& _vmPaths,
 	bool _enforceGasCost,
 	u256 _enforceGasCostMinValue
 ):
-	SolidityExecutionFramework(_evmVersion, _eofVersion, _vmPaths, false),
+	SolidityExecutionFramework(_evmVersion, _vmPaths, false),
 	EVMVersionRestrictedTestCase(_filename),
 	m_sources(m_reader.sources()),
 	m_lineOffset(m_reader.lineNumber()),
@@ -91,11 +90,7 @@ SemanticTest::SemanticTest(
 	if (m_runWithABIEncoderV1Only && !solidity::test::CommonOptions::get().useABIEncoderV1)
 		m_shouldRun = false;
 
-	auto const eofEnabled = solidity::test::CommonOptions::get().eofVersion().has_value();
-	std::string compileViaYul = m_reader.stringSetting("compileViaYul", eofEnabled ? "true" : "also");
-
-	if (compileViaYul == "false" && eofEnabled)
-		m_shouldRun = false;
+	std::string compileViaYul = m_reader.stringSetting("compileViaYul", "also");
 
 	if (m_runWithABIEncoderV1Only && compileViaYul != "false")
 		BOOST_THROW_EXCEPTION(std::runtime_error(
@@ -112,6 +107,8 @@ SemanticTest::SemanticTest(
 	m_revertStrings = revertStrings.value();
 
 	m_allowNonExistingFunctions = m_reader.boolSetting("allowNonExistingFunctions", false);
+	m_testCaseWantsSSACFGRun = m_reader.boolSetting("compileViaSSACFG", true);
+	m_compiler.setExperimental(m_reader.boolSetting("experimental", m_testCaseWantsSSACFGRun));
 
 	parseExpectations(m_reader.stream());
 	soltestAssert(!m_tests.empty(), "No tests specified in " + _filename);
@@ -321,7 +318,7 @@ TestCase::TestResult SemanticTest::run(std::ostream& _stream, std::string const&
 {
 	TestResult result = TestResult::Success;
 
-	if (m_testCaseWantsLegacyRun && !m_eofVersion.has_value())
+	if (m_testCaseWantsLegacyRun)
 		result = runTest(_stream, _linePrefix, _formatted, false /* _isYulRun */);
 
 	if (m_testCaseWantsYulRun && result == TestResult::Success)
@@ -330,6 +327,14 @@ TestCase::TestResult SemanticTest::run(std::ostream& _stream, std::string const&
 			result = runTest(_stream, _linePrefix, _formatted, true /* _isYulRun */);
 		else
 			result = tryRunTestWithYulOptimizer(_stream, _linePrefix, _formatted);
+	}
+
+	if (m_testCaseWantsSSACFGRun && m_testCaseWantsYulRun && result == TestResult::Success)
+	{
+		if (solidity::test::CommonOptions::get().optimize)
+			result = runTest(_stream, _linePrefix, _formatted, true /* _isYulRun */, true /* _isSSACFGRun */);
+		else
+			result = tryRunTestWithYulOptimizer(_stream, _linePrefix, _formatted, true /* _isSSACFGRun */);
 	}
 
 	if (result != TestResult::Success)
@@ -346,19 +351,24 @@ TestCase::TestResult SemanticTest::runTest(
 	std::ostream& _stream,
 	std::string const& _linePrefix,
 	bool _formatted,
-	bool _isYulRun
+	bool _isYulRun,
+	bool _isSSACFGRun
 )
 {
 	bool success = true;
 	m_gasCostFailure = false;
+	m_isSSACFGRun = _isSSACFGRun;
 
 	selectVM(evmc_capabilities::EVMC_CAPABILITY_EVM1);
 
 	reset();
 
 	m_compileViaYul = _isYulRun;
+	m_compileViaSSACFG = _isSSACFGRun;
 
-	if (_isYulRun)
+	if (_isSSACFGRun)
+		AnsiColorized(_stream, _formatted, {BOLD, CYAN}) << _linePrefix << "Running via SSA Yul: " << std::endl;
+	else if (_isYulRun)
 		AnsiColorized(_stream, _formatted, {BOLD, CYAN}) << _linePrefix << "Running via Yul: " << std::endl;
 
 	for (TestFunctionCall& test: m_tests)
@@ -524,7 +534,8 @@ TestCase::TestResult SemanticTest::runTest(
 TestCase::TestResult SemanticTest::tryRunTestWithYulOptimizer(
 	std::ostream& _stream,
 	std::string const& _linePrefix,
-	bool _formatted
+	bool _formatted,
+	bool _isSSACFGRun
 )
 {
 	TestResult result{};
@@ -541,7 +552,7 @@ TestCase::TestResult SemanticTest::tryRunTestWithYulOptimizer(
 
 		try
 		{
-			result = runTest(_stream, _linePrefix, _formatted, true /* _isYulRun */);
+			result = runTest(_stream, _linePrefix, _formatted, true /* _isYulRun */, _isSSACFGRun);
 		}
 		catch (yul::StackTooDeepError const&)
 		{
@@ -570,9 +581,10 @@ TestCase::TestResult SemanticTest::tryRunTestWithYulOptimizer(
 
 bool SemanticTest::checkGasCostExpectation(TestFunctionCall& io_test, bool _compileViaYul) const
 {
-	std::string setting =
-		(_compileViaYul ? "ir"s : "legacy"s) +
-		(m_optimiserSettings == OptimiserSettings::full() ? "Optimized" : "");
+	std::string setting = m_isSSACFGRun
+		? (m_optimiserSettings == OptimiserSettings::full() ? "ssaCFGOptimized"s : "ssaCFG"s)
+		: (_compileViaYul ? "ir"s : "legacy"s) +
+		  (m_optimiserSettings == OptimiserSettings::full() ? "Optimized" : "");
 
 	soltestAssert(
 		io_test.call().expectations.gasUsedExcludingCode.count(setting) ==
@@ -583,6 +595,7 @@ bool SemanticTest::checkGasCostExpectation(TestFunctionCall& io_test, bool _comp
 		m_gasUsed < m_enforceGasCostMinValue || // gas used less than threshold for enforcing feature
 		m_gasUsed >= InitialGas || // test has used up all available gas (test will fail anyway)
 		setting == "ir" ||
+		setting == "ssaCFG" ||
 		io_test.call().kind == FunctionCall::Kind::Builtin; // isoltest builtin e.g. `smokeTest` or `storageEmpty`
 	bool gasValueMissing = !io_test.call().expectations.gasUsedExcludingCode.contains(setting);
 	if (!m_enforceGasCost || (gasValueMissing && uninteresting))

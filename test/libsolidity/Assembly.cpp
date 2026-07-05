@@ -56,17 +56,13 @@ evmasm::AssemblyItems compileContract(std::shared_ptr<CharStream> _sourceCode)
 {
 	ErrorList errors;
 	ErrorReporter errorReporter(errors);
-	Parser parser(
-		errorReporter,
-		solidity::test::CommonOptions::get().evmVersion(),
-		solidity::test::CommonOptions::get().eofVersion()
-	);
+	Parser parser(errorReporter, solidity::test::CommonOptions::get().evmVersion());
 	ASTPointer<SourceUnit> sourceUnit;
 	BOOST_REQUIRE_NO_THROW(sourceUnit = parser.parse(*_sourceCode));
 	BOOST_CHECK(!!sourceUnit);
 
 	Scoper::assignScopes(*sourceUnit);
-	BOOST_REQUIRE(SyntaxChecker(errorReporter, false).checkSyntax(*sourceUnit));
+	BOOST_REQUIRE(SyntaxChecker(errorReporter, false /* _useYulOptimizer */, false /* _experimental */).checkSyntax(*sourceUnit));
 	GlobalContext globalContext(solidity::test::CommonOptions::get().evmVersion());
 	NameAndTypeResolver resolver(globalContext, solidity::test::CommonOptions::get().evmVersion(), errorReporter, false);
 	DeclarationTypeChecker declarationTypeChecker(errorReporter, solidity::test::CommonOptions::get().evmVersion());
@@ -81,11 +77,7 @@ evmasm::AssemblyItems compileContract(std::shared_ptr<CharStream> _sourceCode)
 		if (Error::containsErrors(errorReporter.errors()))
 			return AssemblyItems();
 	}
-	TypeChecker checker(
-		solidity::test::CommonOptions::get().evmVersion(),
-		solidity::test::CommonOptions::get().eofVersion(),
-		errorReporter
-	);
+	TypeChecker checker(solidity::test::CommonOptions::get().evmVersion(), errorReporter);
 	BOOST_REQUIRE_NO_THROW(checker.checkTypeRequirements(*sourceUnit));
 	if (Error::containsErrors(errorReporter.errors()))
 		return AssemblyItems();
@@ -94,14 +86,12 @@ evmasm::AssemblyItems compileContract(std::shared_ptr<CharStream> _sourceCode)
 		{
 			Compiler compiler(
 				solidity::test::CommonOptions::get().evmVersion(),
-				solidity::test::CommonOptions::get().eofVersion(),
 				RevertStrings::Default,
 				solidity::test::CommonOptions::get().optimize ? OptimiserSettings::standard() : OptimiserSettings::minimal()
 			);
 			compiler.compileContract(*contract, std::map<ContractDefinition const*, std::shared_ptr<Compiler const>>{}, bytes());
 
-			BOOST_REQUIRE(compiler.runtimeAssembly().codeSections().size() == 1);
-			return compiler.runtimeAssembly().codeSections().at(0).items;
+			return compiler.runtimeAssembly().items();
 		}
 	BOOST_FAIL("No contract found in source.");
 	return AssemblyItems();

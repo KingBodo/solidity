@@ -52,12 +52,10 @@ class YulUtilFunctions
 public:
 	explicit YulUtilFunctions(
 		langutil::EVMVersion _evmVersion,
-		std::optional<uint8_t> _eofVersion,
 		RevertStrings _revertStrings,
 		MultiUseYulFunctionCollector& _functionCollector
 	):
 		m_evmVersion(_evmVersion),
-		m_eofVersion(_eofVersion),
 		m_revertStrings(_revertStrings),
 		m_functionCollector(_functionCollector)
 	{}
@@ -566,6 +564,14 @@ public:
 	/// @return the name of a function that checks if two external functions pointers are equal or not
 	std::string externalFunctionPointersEqualFunction();
 
+	/// Generates a function that calculates storage namespace base address using the ERC-7201 formula.
+	/// The function expects an address pointing to the data of a byte array stored in memory
+	/// and the size of the data as its arguments.
+	/// The function uses scratch space.
+	/// @return The name of the function.
+	/// Signature: (namespaceIDDataPtr, namespaceIDLength) -> slot
+	std::string erc7201();
+
 private:
 	/// @returns the name of a function that copies a struct from calldata or memory to storage
 	/// signature: (slot, value) ->
@@ -645,7 +651,6 @@ private:
 	std::string longByteArrayStorageIndexAccessNoCheckFunction();
 
 	langutil::EVMVersion m_evmVersion;
-	std::optional<uint8_t> m_eofVersion;
 	RevertStrings m_revertStrings;
 	MultiUseYulFunctionCollector& m_functionCollector;
 };

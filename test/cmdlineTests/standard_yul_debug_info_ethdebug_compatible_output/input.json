@@ -8,9 +8,10 @@
 		}
 	},
 	"settings": {
+		"experimental": true,
 		"debug": {"debugInfo": ["ethdebug"]},
 		"outputSelection": {
-			"*": {"*": ["ir", "irOptimized", "evm.bytecode.ethdebug"]}
+			"*": {"*": ["ir", "irOptimized", "evm.bytecode.ethdebug", "ethdebug.resources"]}
 		}
 	}
 }

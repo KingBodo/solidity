@@ -14,7 +14,6 @@ contract B {
     }
 }
 // ====
-// bytecodeFormat: legacy,>=EOFv1
 // ----
 // testIt() ->
 // test() -> 2

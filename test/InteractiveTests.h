@@ -22,6 +22,7 @@
 #include <test/libsolidity/ABIJsonTest.h>
 #include <test/libsolidity/ASTJSONTest.h>
 #include <test/libsolidity/ASTPropertyTest.h>
+#include <test/libsolidity/EthdebugTest.h>
 #include <libsolidity/FunctionDependencyGraphTest.h>
 #include <test/libsolidity/GasTest.h>
 #include <test/libsolidity/MemoryGuardTest.h>
@@ -30,8 +31,14 @@
 #include <test/libsolidity/SyntaxTest.h>
 #include <test/libsolidity/SemanticTest.h>
 #include <test/libsolidity/SMTCheckerTest.h>
+
+#include <test/libyul/ssa/CallGraphTest.h>
+#include <test/libyul/ssa/ControlFlowGraphTest.h>
+#include <test/libyul/ssa/PrinterTest.h>
+#include <test/libyul/ssa/SpillTest.h>
+#include <test/libyul/ssa/StackLayoutGeneratorTest.h>
+#include <test/libyul/ssa/StackShufflerTest.h>
 #include <test/libyul/ControlFlowGraphTest.h>
-#include <test/libyul/SSAControlFlowGraphTest.h>
 #include <test/libyul/EVMCodeTransformTest.h>
 #include <test/libyul/YulOptimizerTest.h>
 #include <test/libyul/YulInterpreterTest.h>
@@ -71,7 +78,12 @@ Testsuite const g_interactiveTestsuites[] = {
 	{"Yul Interpreter",             "libyul",      "yulInterpreterTests",           false, false, &yul::test::YulInterpreterTest::create},
 	{"Yul Object Compiler",         "libyul",      "objectCompiler",                false, false, &yul::test::ObjectCompilerTest::create},
 	{"Yul Control Flow Graph",      "libyul",      "yulControlFlowGraph",           false, false, &yul::test::ControlFlowGraphTest::create},
-	{"Yul SSA Control Flow Graph",  "libyul",      "yulSSAControlFlowGraph",        false, false, &yul::test::SSAControlFlowGraphTest::create},
+	{"Yul SSA Control Flow Graph",  "libyul",      "ssa/controlFlowGraph",          false, false, &yul::test::ssa::ControlFlowGraphTest::create},
+	{"Yul SSA Call Graph",          "libyul",      "ssa/callGraph",                 false, false, &yul::test::ssa::CallGraphTest::create},
+	{"Yul SSA Printer",             "libyul",      "ssa/printer",                   false, false, &yul::test::ssa::PrinterTest::create},
+	{"Yul SSA StackShuffling",      "libyul",      "ssa/stackShuffler",             false, false, &yul::test::ssa::ShufflingTest::create},
+	{"Yul SSA StackLayoutGenerator","libyul",      "ssa/stackLayoutGenerator",      false, false, &yul::test::ssa::StackLayoutGeneratorTest::create},
+	{"Yul SSA Spill",               "libyul",      "ssa/spill",                     false, false, &yul::test::ssa::SpillTest::create},
 	{"Yul Stack Layout",            "libyul",      "yulStackLayout",                false, false, &yul::test::StackLayoutGeneratorTest::create},
 	{"Yul Stack Shuffling",         "libyul",      "yulStackShuffling",             false, false, &yul::test::StackShufflingTest::create},
 	{"Control Flow Side Effects",   "libyul",      "controlFlowSideEffects",        false, false, &yul::test::ControlFlowSideEffectsTest::create},
@@ -84,6 +96,7 @@ Testsuite const g_interactiveTestsuites[] = {
 	{"JSON ABI",                    "libsolidity", "ABIJson",                       false, false, &ABIJsonTest::create},
 	{"JSON Natspec",                "libsolidity", "natspecJSON",                   false, false, &NatspecJSONTest::create},
 	{"SMT Checker",                 "libsolidity", "smtCheckerTests",               true,  false, &SMTCheckerTest::create},
+	{"Ethdebug",                    "libsolidity", "ethdebugTests",                 false, false, &EthdebugTest::create},
 	{"Gas Estimates",               "libsolidity", "gasTests",                      false, false, &GasTest::create},
 	{"Memory Guard",                "libsolidity", "memoryGuardTests",              false, false, &MemoryGuardTest::create},
 	{"AST Properties",              "libsolidity", "astPropertyTests",              false, false, &ASTPropertyTest::create},

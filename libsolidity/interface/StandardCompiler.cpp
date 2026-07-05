@@ -46,6 +46,8 @@
 #include <algorithm>
 #include <optional>
 
+#include <range/v3/algorithm/contains.hpp>
+
 using namespace solidity;
 using namespace solidity::yul;
 using namespace solidity::frontend;
@@ -242,6 +244,18 @@ bool isArtifactRequested(Json const& _outputSelection, std::string const& _file,
 	return false;
 }
 
+/// @returns boolean indicating whether @_artifacts is contained in @_outputSelection. Helper function.
+template<ranges::range Range>
+bool areArtifactsRequested(Json const& _outputSelection, Range&& _artifacts)
+{
+	for (auto const& fileRequests: _outputSelection)
+		for (auto const& requests: fileRequests)
+			for (auto const& request: requests)
+				if (ranges::contains(_artifacts, request.get<std::string>()))
+					return true;
+	return false;
+}
+
 /// @returns all artifact names of the EVM object, either for creation or deploy time.
 std::vector<std::string> evmObjectComponents(std::string const& _objectKind)
 {
@@ -262,7 +276,7 @@ bool isBinaryRequested(Json const& _outputSelection)
 	static std::vector<std::string> const outputsThatRequireBinaries = std::vector<std::string>{
 		"*",
 		"ir", "irAst", "irOptimized", "irOptimizedAst", "yulCFGJson",
-		"evm.gasEstimates", "evm.legacyAssembly", "evm.assembly", "ethdebug"
+		"evm.gasEstimates", "evm.legacyAssembly", "evm.assembly"
 	} + evmObjectComponents("bytecode") + evmObjectComponents("deployedBytecode");
 
 	for (auto const& fileRequests: _outputSelection)
@@ -292,19 +306,60 @@ bool isEvmBytecodeRequested(Json const& _outputSelection)
 	return false;
 }
 
-/// @returns true if ethdebug was requested.
-bool isEthdebugRequested(Json const& _outputSelection)
+/// @returns true if any per-contract ethdebug program output was requested.
+bool isEthdebugProgramRequested(Json const& _outputSelection)
 {
 	if (!_outputSelection.is_object())
 		return false;
 
-	for (auto const& fileRequests: _outputSelection)
-		for (auto const& requests: fileRequests)
-			for (auto const& request: requests)
-				if (request == "evm.bytecode.ethdebug" || request == "evm.deployedBytecode.ethdebug")
-					return true;
+	static std::array constexpr ethdebugArtifacts{"evm.bytecode.ethdebug", "evm.deployedBytecode.ethdebug"};
+
+	return areArtifactsRequested(_outputSelection, ethdebugArtifacts);
+}
+
+/// @returns true if any ethdebug output (global or per-contract) was requested.
+bool isAnyEthdebugRequested(Json const& _outputSelection)
+{
+	if (!_outputSelection.is_object())
+		return false;
+
+	static std::array constexpr ethdebugArtifacts{
+		"evm.bytecode.ethdebug", "evm.deployedBytecode.ethdebug",
+		"ethdebug.resources", "ethdebug.compilation"
+	};
+
+	return areArtifactsRequested(_outputSelection, ethdebugArtifacts);
+}
+
+/// @returns true if the given global ethdebug output was requested via */*.
+bool isEthdebugGlobalOutputRequested(Json const& _outputSelection, std::string const& _artifact)
+{
+	if (!_outputSelection.is_object())
+		return false;
+
+	static std::array constexpr globalEthdebugArtifacts{"ethdebug.resources", "ethdebug.compilation"};
+	if (!ranges::contains(globalEthdebugArtifacts, _artifact))
+		return false;
+
+	for (auto const& [file, contracts]: _outputSelection.items())
+		if (file == "*" && contracts.is_object())
+			for (auto const& [contract, requests]: contracts.items())
+				if (contract == "*" && requests.is_array())
+					for (auto const& request: requests)
+						if (request.get<std::string>() == _artifact)
+							return true;
 
 	return false;
+}
+
+bool isExperimentalArtifactRequested(Json const& _outputSelection)
+{
+	static std::array constexpr experimentalArtifacts{"irAst", "irOptimizedAst", "yulCFGJson"};
+
+	if (isAnyEthdebugRequested(_outputSelection))
+		return true;
+
+	return areArtifactsRequested(_outputSelection, experimentalArtifacts);
 }
 
 /// @returns The set of selected contracts, along with their compiler pipeline configuration, based
@@ -430,7 +485,7 @@ std::optional<Json> checkAuxiliaryInputKeys(Json const& _input)
 
 std::optional<Json> checkSettingsKeys(Json const& _input)
 {
-	static std::set<std::string> keys{"debug", "evmVersion", "eofVersion", "libraries", "metadata", "modelChecker", "optimizer", "outputSelection", "remappings", "stopAfter", "viaIR"};
+	static std::set<std::string> keys{"debug", "evmVersion", "experimental", "libraries", "metadata", "modelChecker", "optimizer", "outputSelection", "remappings", "stopAfter", "viaIR", "viaSSACFG"};
 	return checkKeys(_input, keys, "settings");
 }
 
@@ -585,7 +640,8 @@ std::variant<OptimiserSettings, Json> parseOptimizerSettings(std::string_view co
 	{
 		if (!_jsonInput["runs"].is_number_unsigned())
 			return formatFatalError(Error::Type::JSONError, "The \"runs\" setting must be an unsigned number.");
-		settings.expectedExecutionsPerDeployment = _jsonInput["runs"].get<size_t>();
+		static_assert(std::is_same_v<decltype(settings.expectedExecutionsPerDeployment), Json::number_unsigned_t>);
+		settings.expectedExecutionsPerDeployment = _jsonInput["runs"].get<Json::number_unsigned_t>();
 	}
 
 	if (_jsonInput.contains("details"))
@@ -803,6 +859,13 @@ std::variant<StandardCompiler::InputsAndSettings, Json> StandardCompiler::parseI
 	if (auto result = checkSettingsKeys(settings))
 		return *result;
 
+	if (settings.contains("experimental"))
+	{
+		if (!settings["experimental"].is_boolean())
+			return formatFatalError(Error::Type::JSONError, "'settings.experimental' must be a Boolean.");
+		ret.experimental = settings["experimental"].get<bool>();
+	}
+
 	if (settings.contains("stopAfter"))
 	{
 		if (!settings["stopAfter"].is_string())
@@ -821,6 +884,22 @@ std::variant<StandardCompiler::InputsAndSettings, Json> StandardCompiler::parseI
 		ret.viaIR = settings["viaIR"].get<bool>();
 	}
 
+	if (settings.contains("viaSSACFG"))
+	{
+		if (!settings["viaSSACFG"].is_boolean())
+			return formatFatalError(Error::Type::JSONError, "\"settings.viaSSACFG\" must be a Boolean.");
+		ret.viaSSACFG = settings["viaSSACFG"].get<bool>();
+		if (ret.viaSSACFG)
+		{
+			if (settings.contains("viaIR") && !ret.viaIR)
+				return formatFatalError(
+					Error::Type::JSONError,
+					"\"settings.viaSSACFG\" requires compilation via IR."
+				);
+			ret.viaIR = true;
+		}
+	}
+
 	if (settings.contains("evmVersion"))
 	{
 		if (!settings["evmVersion"].is_string())
@@ -834,21 +913,13 @@ std::variant<StandardCompiler::InputsAndSettings, Json> StandardCompiler::parseI
 				"general",
 				"Support for EVM versions older than constantinople is deprecated and will be removed in the future."
 			));
+		if (version->isExperimental() && !ret.experimental)
+			return formatFatalError(
+				Error::Type::JSONError,
+				fmt::format("EVM version '{}' is experimental and can only be used with the 'settings.experimental' option enabled.", version->name())
+			);
 		ret.evmVersion = *version;
 	}
-
-	if (settings.contains("eofVersion"))
-	{
-		if (!settings["eofVersion"].is_number_unsigned())
-			return formatFatalError(Error::Type::JSONError, "eofVersion must be an unsigned integer.");
-		auto eofVersion = settings["eofVersion"].get<uint8_t>();
-		if (eofVersion != 1)
-			return formatFatalError(Error::Type::JSONError, "Invalid EOF version requested.");
-		ret.eofVersion = 1;
-	}
-
-	if (ret.eofVersion.has_value() && !ret.evmVersion.supportsEOF())
-		return formatFatalError(Error::Type::JSONError, "EOF is not supported by EVM versions earlier than " + EVMVersion::firstWithEOF().name() + ".");
 
 	if (settings.contains("debug"))
 	{
@@ -1180,13 +1251,13 @@ std::variant<StandardCompiler::InputsAndSettings, Json> StandardCompiler::parseI
 		ret.modelCheckerSettings.timeout = modelCheckerSettings["timeout"].get<Json::number_unsigned_t>();
 	}
 
-	if ((ret.debugInfoSelection.has_value() && ret.debugInfoSelection->ethdebug) || isEthdebugRequested(ret.outputSelection))
+	if ((ret.debugInfoSelection.has_value() && ret.debugInfoSelection->ethdebug) || isAnyEthdebugRequested(ret.outputSelection))
 	{
 		if (ret.language != "Solidity" && ret.language != "Yul")
 			return formatFatalError(Error::Type::FatalError, "'settings.debug.debugInfo' 'ethdebug' is only supported for languages 'Solidity' and 'Yul'.");
 	}
 
-	if (isEthdebugRequested(ret.outputSelection))
+	if (isEthdebugProgramRequested(ret.outputSelection))
 	{
 		if (ret.language == "Solidity" && !ret.viaIR)
 			return formatFatalError(Error::Type::FatalError, "'evm.bytecode.ethdebug' or 'evm.deployedBytecode.ethdebug' can only be selected as output, if 'viaIR' was set.");
@@ -1203,15 +1274,35 @@ std::variant<StandardCompiler::InputsAndSettings, Json> StandardCompiler::parseI
 		}
 	}
 
-	if (
-		ret.debugInfoSelection.has_value() && ret.debugInfoSelection->ethdebug && (ret.language == "Solidity" || ret.language == "Yul") &&
-		!pipelineConfig(ret.outputSelection)[""][""].irCodegen && !isEthdebugRequested(ret.outputSelection)
-	)
-		return formatFatalError(Error::Type::FatalError, "'settings.debug.debugInfo' can only include 'ethdebug', if output 'ir', 'irOptimized', 'evm.bytecode.ethdebug', or 'evm.deployedBytecode.ethdebug' was selected.");
+	if (ret.debugInfoSelection.has_value() && ret.debugInfoSelection->ethdebug)
+	{
+		if (!ret.experimental)
+			return formatFatalError(Error::Type::FatalError, "Ethdebug annotations are experimental and can only be included in 'settings.debug.debugInfo' by enabling the 'settings.experimental' option.");
+	}
 
-	if (isEthdebugRequested(ret.outputSelection))
+	if (isEthdebugProgramRequested(ret.outputSelection))
+	{
 		if (ret.optimiserSettings.runYulOptimiser)
 			solUnimplemented("Optimization is not yet supported with ethdebug.");
+		if (ret.viaSSACFG)
+			solUnimplemented("SSA CFG codegen does not yet support ethdebug.");
+	}
+
+	if (!ret.experimental)
+	{
+		if (ret.language == "SolidityAST" || ret.language == "EVMAssembly")
+			return formatFatalError(Error::Type::FatalError, "'SolidityAST' and 'EVMAssembly' inputs are experimental and can only be used with the 'settings.experimental' option enabled.");
+
+		if (ret.evmVersion.isExperimental())
+			// TODO: Cover with test when the Amsterdam version is introduced
+			return formatFatalError(Error::Type::FatalError, fmt::format("EVM version '{}' is experimental and can only be used with the 'settings.experimental' option enabled.", ret.evmVersion.name()));
+
+		if (isExperimentalArtifactRequested(ret.outputSelection))
+			return formatFatalError(Error::Type::FatalError, "'irAst', 'irOptimizedAst', 'yulCFGJson', and 'ethdebug' outputs are experimental and can only be used with the 'settings.experimental' option enabled.");
+
+		if (ret.viaSSACFG)
+			return formatFatalError(Error::Type::FatalError, "'viaSSACFG' setting is experimental and can only be used with the 'settings.experimental' option enabled.");
+	}
 
 	return {std::move(ret)};
 }
@@ -1238,13 +1329,13 @@ Json StandardCompiler::importEVMAssembly(StandardCompiler::InputsAndSettings _in
 	solAssert(_inputsAndSettings.language == "EVMAssembly");
 	solAssert(_inputsAndSettings.sources.empty());
 	solAssert(_inputsAndSettings.jsonSources.size() == 1);
+	solAssert(_inputsAndSettings.experimental);
 
 	if (!isBinaryRequested(_inputsAndSettings.outputSelection))
 		return Json::object();
 
 	evmasm::EVMAssemblyStack stack(
 		_inputsAndSettings.evmVersion,
-		_inputsAndSettings.eofVersion,
 		evmasm::Assembly::OptimiserSettings::translateSettings(
 			_inputsAndSettings.optimiserSettings
 		)
@@ -1360,8 +1451,8 @@ Json StandardCompiler::compileSolidity(StandardCompiler::InputsAndSettings _inpu
 	for (auto const& smtLib2Response: _inputsAndSettings.smtLib2Responses)
 		compilerStack.addSMTLib2Response(smtLib2Response.first, smtLib2Response.second);
 	compilerStack.setViaIR(_inputsAndSettings.viaIR);
+	compilerStack.setViaSSACFG(_inputsAndSettings.viaSSACFG);
 	compilerStack.setEVMVersion(_inputsAndSettings.evmVersion);
-	compilerStack.setEOFVersion(_inputsAndSettings.eofVersion);
 	compilerStack.setRemappings(std::move(_inputsAndSettings.remappings));
 	compilerStack.setOptimiserSettings(std::move(_inputsAndSettings.optimiserSettings));
 	compilerStack.setRevertStringBehaviour(_inputsAndSettings.revertStrings);
@@ -1373,6 +1464,7 @@ Json StandardCompiler::compileSolidity(StandardCompiler::InputsAndSettings _inpu
 	compilerStack.setMetadataHash(_inputsAndSettings.metadataHash);
 	compilerStack.selectContracts(pipelineConfig(_inputsAndSettings.outputSelection));
 	compilerStack.setModelCheckerSettings(_inputsAndSettings.modelCheckerSettings);
+	compilerStack.setExperimental(_inputsAndSettings.experimental);
 
 	Json errors = std::move(_inputsAndSettings.errors);
 
@@ -1627,8 +1719,13 @@ Json StandardCompiler::compileSolidity(StandardCompiler::InputsAndSettings _inpu
 		}
 	}
 
-	if (isEthdebugRequested(_inputsAndSettings.outputSelection))
-		output["ethdebug"] = compilerStack.ethdebug();
+	if (analysisSuccess)
+	{
+		if (isEthdebugGlobalOutputRequested(_inputsAndSettings.outputSelection, "ethdebug.resources"))
+			output["ethdebug"]["resources"] = compilerStack.ethdebug();
+		if (isEthdebugGlobalOutputRequested(_inputsAndSettings.outputSelection, "ethdebug.compilation"))
+			output["ethdebug"]["compilation"] = compilerStack.ethdebugCompilation();
+	}
 
 	if (!contractsOutput.empty())
 		output["contracts"] = contractsOutput;
@@ -1683,8 +1780,6 @@ Json StandardCompiler::compileYul(InputsAndSettings _inputsAndSettings)
 
 	YulStack stack(
 		_inputsAndSettings.evmVersion,
-		_inputsAndSettings.eofVersion,
-		YulStack::Language::StrictAssembly,
 		_inputsAndSettings.optimiserSettings,
 		_inputsAndSettings.debugInfoSelection.has_value() ?
 			_inputsAndSettings.debugInfoSelection.value() :
@@ -1716,7 +1811,7 @@ Json StandardCompiler::compileYul(InputsAndSettings _inputsAndSettings)
 			output["sources"][sourceName] = sourceResult;
 		}
 		stack.optimize();
-		std::tie(object, deployedObject) = stack.assembleWithDeployed();
+		std::tie(object, deployedObject) = stack.assembleWithDeployed({}, _inputsAndSettings.viaSSACFG);
 		if (object.bytecode)
 			object.bytecode->link(_inputsAndSettings.libraries);
 		if (deployedObject.bytecode)
@@ -1772,7 +1867,10 @@ Json StandardCompiler::compileYul(InputsAndSettings _inputsAndSettings)
 				if (evmArtifactRequested(kind, "linkReferences"))
 					bytecodeJSON["linkReferences"] = formatLinkReferences(selectedObject.bytecode->linkReferences);
 				if (evmArtifactRequested(kind, "ethdebug"))
+				{
+					solAssert(_inputsAndSettings.experimental);
 					bytecodeJSON["ethdebug"] = selectedObject.ethdebug;
+				}
 				if (isDeployed && evmArtifactRequested(kind, "immutableReferences"))
 					bytecodeJSON["immutableReferences"] = formatImmutableReferences(selectedObject.bytecode->immutableReferences);
 				output["contracts"][sourceName][contractName]["evm"][kind] = bytecodeJSON;
@@ -1784,11 +1882,27 @@ Json StandardCompiler::compileYul(InputsAndSettings _inputsAndSettings)
 	if (isArtifactRequested(_inputsAndSettings.outputSelection, sourceName, contractName, "evm.assembly", wildcardMatchesExperimental))
 		output["contracts"][sourceName][contractName]["evm"]["assembly"] = object.assembly->assemblyString(stack.debugInfoSelection());
 	if (isArtifactRequested(_inputsAndSettings.outputSelection, sourceName, contractName, "yulCFGJson", wildcardMatchesExperimental))
+	{
+		solAssert(_inputsAndSettings.experimental, "");
 		output["contracts"][sourceName][contractName]["yulCFGJson"] = stack.cfgJson();
+	}
 
-	if (isEthdebugRequested(_inputsAndSettings.outputSelection))
-		output["ethdebug"] = evmasm::ethdebug::resources({sourceName}, VersionString);
-
+	if (isEthdebugGlobalOutputRequested(_inputsAndSettings.outputSelection, "ethdebug.resources"))
+	{
+		solAssert(_inputsAndSettings.experimental, "");
+		output["ethdebug"]["resources"] = evmasm::ethdebug::resources(
+			{{.id = 0, .path = sourceName, .contents = sourceContents, .language = "Yul"}},
+			VersionString
+		);
+	}
+	if (isEthdebugGlobalOutputRequested(_inputsAndSettings.outputSelection, "ethdebug.compilation"))
+	{
+		solAssert(_inputsAndSettings.experimental, "");
+		output["ethdebug"]["compilation"] = evmasm::ethdebug::compilation(
+			{{.id = 0, .path = sourceName, .contents = sourceContents, .language = "Yul"}},
+			VersionString
+		);
+	}
 	return output;
 }
 

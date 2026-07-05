@@ -20,6 +20,10 @@
 
 #include <libevmasm/EthdebugSchema.h>
 
+#include <libsolutil/Keccak256.h>
+
+#include <fmt/format.h>
+
 #include <range/v3/algorithm/any_of.hpp>
 
 using namespace solidity;
@@ -64,10 +68,10 @@ schema::materials::Reference sourceReference(unsigned _sourceID)
 	};
 }
 
-std::optional<schema::program::Context> instructionContext(Assembly::CodeSection const& _codeSection, size_t _assemblyItemIndex, unsigned _sourceID)
+std::optional<schema::program::Context> instructionContext(AssemblyItems const& _codeSection, size_t _assemblyItemIndex, unsigned _sourceID)
 {
-	solAssert(_assemblyItemIndex < _codeSection.items.size());
-	langutil::SourceLocation const& location = _codeSection.items.at(_assemblyItemIndex).location();
+	solAssert(_assemblyItemIndex < _codeSection.size());
+	langutil::SourceLocation const& location = _codeSection.at(_assemblyItemIndex).location();
 	if (!location.isValid())
 		return std::nullopt;
 
@@ -81,18 +85,16 @@ std::optional<schema::program::Context> instructionContext(Assembly::CodeSection
 	};
 }
 
-std::vector<schema::program::Instruction> codeSectionInstructions(Assembly const& _assembly, LinkerObject const& _linkerObject, unsigned const _sourceID, size_t const _codeSectionIndex)
+std::vector<schema::program::Instruction> programInstructions(Assembly const& _assembly, LinkerObject const& _linkerObject, unsigned const _sourceID)
 {
-	solAssert(_codeSectionIndex < _linkerObject.codeSectionLocations.size());
-	solAssert(_codeSectionIndex < _assembly.codeSections().size());
-	auto const& locations = _linkerObject.codeSectionLocations[_codeSectionIndex];
-	auto const& codeSection = _assembly.codeSections().at(_codeSectionIndex);
+	auto const& locations = _linkerObject.codeSectionLocation;
+	AssemblyItems const& items = _assembly.items();
 
 	std::vector<schema::program::Instruction> instructions;
-	instructions.reserve(codeSection.items.size());
+	instructions.reserve(items.size());
 
 	bool const codeSectionContainsVerbatim = ranges::any_of(
-		codeSection.items,
+		items,
 		[](auto const& _instruction) { return _instruction.type() == VerbatimBytecode; }
 	);
 	solUnimplementedAssert(!codeSectionContainsVerbatim, "Verbatim bytecode is currently not supported by ethdebug.");
@@ -109,22 +111,62 @@ std::vector<schema::program::Instruction> codeSectionInstructions(Assembly const
 		instructions.emplace_back(schema::program::Instruction{
 			.offset = schema::data::Unsigned{start},
 			.operation = instructionOperation(_assembly, _linkerObject, start, end),
-			.context = instructionContext(codeSection, currentInstruction.assemblyItemIndex, _sourceID)
+			.context = instructionContext(items, currentInstruction.assemblyItemIndex, _sourceID)
 		});
 	}
 
 	return instructions;
 }
 
-std::vector<schema::program::Instruction> programInstructions(Assembly const& _assembly, LinkerObject const& _linkerObject, unsigned const _sourceID)
+std::string lengthPrefixed(std::string_view _value)
 {
-	auto const numCodeSections = _assembly.codeSections().size();
-	solAssert(numCodeSections == _linkerObject.codeSectionLocations.size());
+	return fmt::format("{}:{}", _value.size(), _value);
+}
 
-	std::vector<schema::program::Instruction> instructionInfo;
-	for (size_t codeSectionIndex = 0; codeSectionIndex < numCodeSections; ++codeSectionIndex)
-		instructionInfo += codeSectionInstructions(_assembly, _linkerObject, _sourceID, codeSectionIndex);
-	return instructionInfo;
+std::string compilationID(std::vector<Source> const& _sources)
+{
+	// Keep this independent from VersionString build metadata.
+	// TODO: take compilation flags into account. Once compiler settings are threaded
+	// into ETHDebug resources, include a normalized settings object here.
+	std::string rawIDInput = "ethdebug-solc-compilation-v1";
+	rawIDInput += lengthPrefixed(std::to_string(_sources.size()));
+
+	for (auto const& source: _sources)
+	{
+		rawIDInput += lengthPrefixed(std::to_string(source.id));
+		rawIDInput += lengthPrefixed(source.path);
+		rawIDInput += lengthPrefixed(source.contents);
+		rawIDInput += lengthPrefixed(source.language);
+	}
+
+	return fmt::format("solc-{}", util::keccak256(rawIDInput).hex());
+}
+
+schema::materials::Source materialSource(Source const& _source)
+{
+	schema::materials::Source result;
+	result.id = schema::materials::ID{_source.id};
+	result.path = _source.path;
+	result.contents = _source.contents;
+	result.encoding = std::nullopt;
+	result.language = _source.language;
+	return result;
+}
+
+schema::materials::Compilation materialCompilation(std::vector<Source> const& _sources, std::string_view _version)
+{
+	std::vector<schema::materials::Source> sources;
+	sources.reserve(_sources.size());
+	for (auto const& source: _sources)
+		sources.emplace_back(materialSource(source));
+
+	schema::materials::Compilation result;
+	result.id = schema::materials::ID{compilationID(_sources)};
+	result.compiler.name = "solc";
+	result.compiler.version = std::string{_version};
+	result.settings = std::nullopt;
+	result.sources = std::move(sources);
+	return result;
 }
 
 } // anonymous namespace
@@ -149,21 +191,16 @@ Json ethdebug::program(std::string_view _name, unsigned _sourceID, Assembly cons
 	};
 }
 
-Json ethdebug::resources(std::vector<std::string> const& _sources, std::string const& _version)
+Json ethdebug::resources(std::vector<Source> const& _sources, std::string_view _version)
 {
-	Json sources = Json::array();
-	for (size_t id = 0; id < _sources.size(); ++id)
-	{
-		Json source = Json::object();
-		source["id"] = id;
-		source["path"] = _sources[id];
-		sources.push_back(source);
-	}
-	Json result = Json::object();
-	result["compilation"] = Json::object();
-	result["compilation"]["compiler"] = Json::object();
-	result["compilation"]["compiler"]["name"] = "solc";
-	result["compilation"]["compiler"]["version"] = _version;
-	result["compilation"]["sources"] = sources;
+	schema::info::Resources result;
+	result.compilation = materialCompilation(_sources, _version);
+	result.types = Json::object();
+	result.pointers = Json::object();
 	return result;
+}
+
+Json ethdebug::compilation(std::vector<Source> const& _sources, std::string_view _version)
+{
+	return materialCompilation(_sources, _version);
 }

@@ -77,7 +77,6 @@ private:
 		std::map<std::string, Json> jsonSources;
 		std::map<util::h256, std::string> smtLib2Responses;
 		langutil::EVMVersion evmVersion;
-		std::optional<uint8_t> eofVersion;
 		std::vector<ImportRemapper::Remapping> remappings;
 		RevertStrings revertStrings = RevertStrings::Default;
 		OptimiserSettings optimiserSettings;
@@ -89,6 +88,8 @@ private:
 		Json outputSelection;
 		ModelCheckerSettings modelCheckerSettings = ModelCheckerSettings{};
 		bool viaIR = false;
+		bool viaSSACFG = false;
+		bool experimental = false;
 	};
 
 	/// Parses the input json (and potentially invokes the read callback) and either returns

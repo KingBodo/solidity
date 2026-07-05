@@ -23,6 +23,8 @@
 #include <libyul/backends/evm/ControlFlowGraph.h>
 #include <libyul/ControlFlowSideEffects.h>
 
+#include <unordered_map>
+
 namespace solidity::yul
 {
 
@@ -56,7 +58,7 @@ private:
 	ControlFlowGraphBuilder(
 		CFG& _graph,
 		AsmAnalysisInfo const& _analysisInfo,
-		std::map<FunctionDefinition const*, ControlFlowSideEffects> const& _functionSideEffects,
+		std::unordered_map<FunctionDefinition const*, ControlFlowSideEffects> const& _functionSideEffects,
 		Dialect const& _dialect
 	);
 	void registerFunction(FunctionDefinition const& _function);
@@ -79,7 +81,7 @@ private:
 	);
 	CFG& m_graph;
 	AsmAnalysisInfo const& m_info;
-	std::map<FunctionDefinition const*, ControlFlowSideEffects> const& m_functionSideEffects;
+	std::unordered_map<FunctionDefinition const*, ControlFlowSideEffects> const& m_functionSideEffects;
 	Dialect const& m_dialect;
 	CFG::BasicBlock* m_currentBlock = nullptr;
 	Scope* m_scope = nullptr;
@@ -90,8 +92,6 @@ private:
 	};
 	std::optional<ForLoopInfo> m_forLoopInfo;
 	std::optional<CFG::FunctionInfo*> m_currentFunction;
-	/// True if control flow graph simulates functions with jumps. False otherwise. True for legacy bytecode
-	bool m_simulateFunctionsWithJumps = true;
 };
 
 }

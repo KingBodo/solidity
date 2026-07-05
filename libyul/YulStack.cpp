@@ -21,7 +21,8 @@
 #include <libyul/AsmAnalysis.h>
 #include <libyul/AsmAnalysisInfo.h>
 #include <libyul/backends/evm/ssa/SSACFGBuilder.h>
-#include <libyul/backends/evm/ssa/SSACFGJsonExporter.h>
+#include <libyul/backends/evm/ssa/io/JSONExporter.h>
+#include <libyul/backends/evm/ssa/transform/OptimizationPipeline.h>
 #include <libyul/backends/evm/EthAssemblyAdapter.h>
 #include <libyul/backends/evm/EVMCodeTransform.h>
 #include <libyul/backends/evm/EVMDialect.h>
@@ -58,7 +59,7 @@ bool YulStack::parse(std::string const& _sourceName, std::string const& _source)
 	{
 		m_charStream = std::make_unique<CharStream>(_source, _sourceName);
 		std::shared_ptr<Scanner> scanner = std::make_shared<Scanner>(*m_charStream);
-		m_parserResult = ObjectParser(m_errorReporter, languageToDialect(m_language, m_evmVersion, m_eofVersion)).parse(scanner, false);
+		m_parserResult = ObjectParser(m_errorReporter, EVMDialect::strictAssemblyForEVMObjects(m_evmVersion)).parse(scanner, false);
 	}
 	catch (UnimplementedFeatureError const& _error)
 	{
@@ -130,9 +131,7 @@ void YulStack::optimize()
 		m_objectOptimizer->optimize(
 			*m_parserResult,
 			ObjectOptimizer::Settings{
-				m_language,
 				m_evmVersion,
-				m_eofVersion,
 				optimizeStackAllocation,
 				yulOptimiserSteps,
 				yulOptimiserCleanupSteps,
@@ -166,7 +165,7 @@ bool YulStack::analyzeParsed(Object& _object)
 	AsmAnalyzer analyzer(
 		*_object.analysisInfo,
 		m_errorReporter,
-		languageToDialect(m_language, m_evmVersion, m_eofVersion),
+		EVMDialect::strictAssemblyForEVMObjects(m_evmVersion),
 		{},
 		_object.summarizeStructure()
 	);
@@ -192,9 +191,9 @@ bool YulStack::analyzeParsed(Object& _object)
 	return success;
 }
 
-void YulStack::compileEVM(AbstractAssembly& _assembly, bool _optimize) const
+void YulStack::compileEVM(AbstractAssembly& _assembly, bool _optimize, bool _viaSSACFG) const
 {
-	EVMObjectCompiler::compile(*m_parserResult, _assembly, _optimize);
+	EVMObjectCompiler::compile(*m_parserResult, _assembly, _optimize, _viaSSACFG);
 }
 
 void YulStack::reparse()
@@ -209,8 +208,6 @@ void YulStack::reparse()
 
 	YulStack cleanStack(
 		m_evmVersion,
-		m_eofVersion,
-		m_language,
 		m_optimiserSettings,
 		m_debugInfoSelection,
 		m_soliditySourceProvider,
@@ -232,7 +229,7 @@ void YulStack::reparse()
 	// locations and fewer warnings.
 }
 
-MachineAssemblyObject YulStack::assemble(Machine _machine)
+MachineAssemblyObject YulStack::assemble(Machine _machine, bool _viaSSACFG)
 {
 	yulAssert(m_stackState >= AnalysisSuccessful);
 	yulAssert(m_parserResult, "");
@@ -242,17 +239,17 @@ MachineAssemblyObject YulStack::assemble(Machine _machine)
 	switch (_machine)
 	{
 	case Machine::EVM:
-		return assembleWithDeployed().first;
+		return assembleWithDeployed({}, _viaSSACFG).first;
 	}
 	unreachable();
 }
 
 std::pair<MachineAssemblyObject, MachineAssemblyObject>
-YulStack::assembleWithDeployed(std::optional<std::string_view> _deployName)
+YulStack::assembleWithDeployed(std::optional<std::string_view> _deployName, bool _viaSSACFG)
 {
 	yulAssert(m_charStream);
 
-	auto [creationAssembly, deployedAssembly] = assembleEVMWithDeployed(_deployName);
+	auto [creationAssembly, deployedAssembly] = assembleEVMWithDeployed(_deployName, _viaSSACFG);
 	if (!creationAssembly)
 	{
 		yulAssert(!deployedAssembly);
@@ -267,13 +264,10 @@ YulStack::assembleWithDeployed(std::optional<std::string_view> _deployName)
 		yulAssert(creationObject.bytecode->immutableReferences.empty(), "Leftover immutables.");
 		creationObject.assembly = creationAssembly;
 		creationObject.sourceMappings = std::make_unique<std::string>();
-		for (auto const& codeSection: creationAssembly->codeSections())
-		{
-			*creationObject.sourceMappings += evmasm::AssemblyItem::computeSourceMapping(
-				codeSection.items,
-				{{m_charStream->name(), 0}}
-			);
-		}
+		*creationObject.sourceMappings = evmasm::AssemblyItem::computeSourceMapping(
+			creationAssembly->items(),
+			{{m_charStream->name(), 0}}
+		);
 		if (debugInfoSelection().ethdebug)
 			creationObject.ethdebug = evmasm::ethdebug::program(creationObject.assembly->name(), 0, *creationObject.assembly, *creationObject.bytecode);
 
@@ -283,12 +277,11 @@ YulStack::assembleWithDeployed(std::optional<std::string_view> _deployName)
 			deployedObject.assembly = deployedAssembly;
 			if (debugInfoSelection().ethdebug)
 				deployedObject.ethdebug = evmasm::ethdebug::program(deployedObject.assembly->name(), 0, *deployedObject.assembly, *deployedObject.bytecode);
-			solAssert(deployedAssembly->codeSections().size() == 1);
 			deployedObject.sourceMappings = std::make_unique<std::string>(
 				evmasm::AssemblyItem::computeSourceMapping(
-					deployedAssembly->codeSections().front().items,
+					deployedAssembly->items(),
 					{{m_charStream->name(), 0}}
-					)
+				)
 			);
 		}
 	}
@@ -307,14 +300,14 @@ YulStack::assembleWithDeployed(std::optional<std::string_view> _deployName)
 }
 
 std::pair<std::shared_ptr<evmasm::Assembly>, std::shared_ptr<evmasm::Assembly>>
-YulStack::assembleEVMWithDeployed(std::optional<std::string_view> _deployName)
+YulStack::assembleEVMWithDeployed(std::optional<std::string_view> _deployName, bool _viaSSACFG)
 {
 	yulAssert(m_stackState >= AnalysisSuccessful);
 	yulAssert(m_parserResult, "");
 	yulAssert(m_parserResult->hasCode(), "");
 	yulAssert(m_parserResult->analysisInfo, "");
 
-	evmasm::Assembly assembly(m_evmVersion, true, m_eofVersion, {});
+	evmasm::Assembly assembly(m_evmVersion, true, {});
 	EthAssemblyAdapter adapter(assembly);
 
 	// NOTE: We always need stack optimization when Yul optimizer is disabled (unless code contains
@@ -326,7 +319,7 @@ YulStack::assembleEVMWithDeployed(std::optional<std::string_view> _deployName)
 	);
 	try
 	{
-		compileEVM(adapter, optimize);
+		compileEVM(adapter, optimize, _viaSSACFG);
 
 		assembly.optimise(evmasm::Assembly::OptimiserSettings::translateSettings(m_optimiserSettings));
 
@@ -398,14 +391,15 @@ Json YulStack::cfgJson() const
 		// operations to the control flow graphs
 		bool constexpr keepLiteralAssignments = true;
 		// NOTE: The block Ids are reset for each object
-		std::unique_ptr<ssa::ControlFlow> controlFlow = ssa::SSACFGBuilder::build(
+		std::unique_ptr<ssa::ControlFlowGraphs> controlFlowGraphs = ssa::SSACFGBuilder::build(
 			*_object.analysisInfo,
-			languageToDialect(m_language, m_evmVersion, m_eofVersion),
+			EVMDialect::strictAssemblyForEVMObjects(m_evmVersion),
 			_object.code()->root(),
 			keepLiteralAssignments
 		);
-		std::unique_ptr<ssa::ControlFlowLiveness> liveness = std::make_unique<ssa::ControlFlowLiveness>(*controlFlow);
-		return ssa::json::exportControlFlow(*controlFlow, liveness.get());
+		ssa::transform::optimize(*controlFlowGraphs);
+		std::unique_ptr<ssa::ControlFlowGraphsLiveness> liveness = std::make_unique<ssa::ControlFlowGraphsLiveness>(*controlFlowGraphs);
+		return ssa::io::json::exportControlFlow(*controlFlowGraphs, liveness.get());
 	};
 
 	std::function<Json(std::vector<std::shared_ptr<ObjectNode>>)> exportCFGFromSubObjects;

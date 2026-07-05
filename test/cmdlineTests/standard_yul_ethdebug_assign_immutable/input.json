@@ -4,8 +4,9 @@
 		"C": {"urls": ["in.yul"]}
 	},
 	"settings": {
+		"experimental": true,
 		"outputSelection": {
-			"*": {"*": ["evm.bytecode.ethdebug"]}
+			"*": {"*": ["evm.bytecode.ethdebug", "ethdebug.resources"]}
 		}
 	}
 }

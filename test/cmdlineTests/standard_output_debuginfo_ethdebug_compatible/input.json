@@ -9,6 +9,7 @@
     }
   },
   "settings": {
+    "experimental": true,
     "viaIR": true,
     "debug": {
       "debugInfo": [
@@ -21,7 +22,8 @@
           "evm.bytecode.ethdebug",
           "evm.deployedBytecode.ethdebug",
           "ir",
-          "irOptimized"
+          "irOptimized",
+          "ethdebug.resources"
         ]
       }
     }

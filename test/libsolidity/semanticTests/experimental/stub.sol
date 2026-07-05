@@ -89,10 +89,10 @@ contract C {
     }
 }
 // ====
+// experimental: true
 // EVMVersion: >=constantinople
 // ====
 // compileViaYul: true
-// bytecodeFormat: legacy
 // ----
 // (): 0 -> 0
 // (): 1 -> 544

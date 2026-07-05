@@ -78,12 +78,12 @@ struct MemoryOffsetAllocator
 			if (FunctionDefinition const* functionDefinition = util::valueOrDefault(functionDefinitions, std::get<YulName>(_function), nullptr, util::allow_copy))
 				if (
 					size_t totalArgCount = functionDefinition->returnVariables.size() + functionDefinition->parameters.size();
-					totalArgCount > 16
+					totalArgCount > reachableStackDepth
 				)
 					for (NameWithDebugData const& var: ranges::concat_view(
 						functionDefinition->parameters,
 						functionDefinition->returnVariables
-					) | ranges::views::take(totalArgCount - 16))
+					) | ranges::views::take(totalArgCount - reachableStackDepth))
 						slotAllocations[var.name] = requiredSlots++;
 
 			// Assign slots for all variables that become unreachable in the function body, if the above did not
@@ -105,6 +105,8 @@ struct MemoryOffsetAllocator
 	std::map<FunctionHandle, std::vector<FunctionHandle>> const& callGraph;
 	/// Maps the name of each user-defined function to its definition.
 	std::map<YulName, FunctionDefinition const*> const& functionDefinitions;
+	/// Max stack slots reachable via DUP/SWAP for the current backend configuration.
+	size_t reachableStackDepth;
 
 	/// Maps variable names to the memory slot the respective variable is assigned.
 	std::map<YulName, uint64_t> slotAllocations{};
@@ -131,10 +133,6 @@ Block StackLimitEvader::run(
 	yulAssert(
 		evmDialect && evmDialect->providesObjectAccess(),
 		"StackLimitEvader can only be run on objects using the EVMDialect with object access."
-	);
-	yulAssert(
-		!evmDialect->eofVersion().has_value(),
-		"StackLimitEvader does not support EOF."
 	);
 	auto astRoot = std::get<Block>(ASTCopier{}(_object.code()->root()));
 	if (evmDialect && evmDialect->evmVersion().canOverchargeGasForCall())
@@ -168,10 +166,6 @@ void StackLimitEvader::run(
 		evmDialect && evmDialect->providesObjectAccess(),
 		"StackLimitEvader can only be run on objects using the EVMDialect with object access."
 	);
-	yulAssert(
-		!evmDialect->eofVersion().has_value(),
-		"StackLimitEvader does not support EOF."
-	);
 	std::map<YulName, std::vector<YulName>> unreachableVariables;
 	for (auto&& [function, stackTooDeepErrors]: _stackTooDeepErrors)
 	{
@@ -195,10 +189,6 @@ void StackLimitEvader::run(
 	yulAssert(
 		evmDialect && evmDialect->providesObjectAccess(),
 		"StackLimitEvader can only be run on objects using the EVMDialect with object access."
-	);
-	yulAssert(
-		!evmDialect->eofVersion().has_value(),
-		"StackLimitEvader does not support EOF."
 	);
 
 	auto const memoryGuardHandle = evmDialect->findBuiltin("memoryguard");
@@ -228,7 +218,12 @@ void StackLimitEvader::run(
 
 	std::map<YulName, FunctionDefinition const*> functionDefinitions = allFunctionDefinitions(_astRoot);
 
-	MemoryOffsetAllocator memoryOffsetAllocator{_unreachableVariables, callGraph.functionCalls, functionDefinitions};
+	MemoryOffsetAllocator memoryOffsetAllocator{
+		_unreachableVariables,
+		callGraph.functionCalls,
+		functionDefinitions,
+		evmDialect->reachableStackDepth()
+	};
 	uint64_t requiredSlots = memoryOffsetAllocator.run();
 	yulAssert(requiredSlots < (uint64_t(1) << 32) - 1, "");
 

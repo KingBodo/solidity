@@ -371,7 +371,7 @@ void StackLayoutGenerator::processEntryPoint(CFG::BasicBlock const& _entry, CFG:
 		// entry layout of the backwards jump target as the initial exit layout of the backwards-jumping block.
 		while (!toVisit.empty())
 		{
-			CFG::BasicBlock const *block = *toVisit.begin();
+			CFG::BasicBlock const* block = *toVisit.begin();
 			toVisit.pop_front();
 
 			if (visited.count(block))
@@ -491,8 +491,7 @@ std::optional<Stack> StackLayoutGenerator::getExitLayoutOrStageDependencies(
 				return StackSlot{_varSlot};
 			}) | ranges::to<Stack>;
 
-			if (simulateFunctionsWithJumps())
-				stack.emplace_back(FunctionReturnLabelSlot{_functionReturn.info->function});
+			stack.emplace_back(FunctionReturnLabelSlot{_functionReturn.info->function});
 			return stack;
 		},
 		[&](CFG::BasicBlock::Terminated const&) -> std::optional<Stack>
@@ -763,7 +762,7 @@ void StackLayoutGenerator::fillInJunk(CFG::BasicBlock const& _block, CFG::Functi
 					_addChild(_conditionalJump.zero);
 					_addChild(_conditionalJump.nonZero);
 				},
-				[&](CFG::BasicBlock::FunctionReturn const&) { yulAssert(!simulateFunctionsWithJumps()); },
+				[&](CFG::BasicBlock::FunctionReturn const&) { yulAssert(false, "FunctionReturn should not be reached during fillInJunk traversal."); },
 				[&](CFG::BasicBlock::Terminated const&) {},
 			}, _block->exit);
 		});

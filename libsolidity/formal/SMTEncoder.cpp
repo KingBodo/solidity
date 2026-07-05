@@ -451,9 +451,10 @@ void SMTEncoder::endVisit(TupleExpression const& _tuple)
 
 void SMTEncoder::endVisit(UnaryOperation const& _op)
 {
-	/// We need to shortcut here due to potentially unknown
-	/// rational number sizes.
-	if (_op.annotation().type->category() == Type::Category::RationalNumber)
+	/// For constant expressions, we need to shortcut here
+	/// due to potentially unknown rational number sizes that
+	/// can appear in intermediary operations, e.g., ~(2**256 - 1).
+	if (isConstant(_op))
 		return;
 
 	if (TokenTraits::isBitOp(_op.getOperator()) && !*_op.annotation().userDefinedFunction)
@@ -3122,8 +3123,11 @@ RationalNumberType const* SMTEncoder::isConstant(Expression const& _expr)
 	if (auto type = dynamic_cast<RationalNumberType const*>(_expr.annotation().type))
 		return type;
 
-	if (auto typedRational = ConstantEvaluator::tryEvaluate(_expr))
-		return TypeProvider::rationalNumber(typedRational->value);
+	if (
+		auto typedValue = ConstantEvaluator::tryEvaluate(_expr);
+		std::holds_alternative<rational>(typedValue.value)
+	)
+		return TypeProvider::rationalNumber(std::get<rational>(typedValue.value));
 
 	return nullptr;
 }

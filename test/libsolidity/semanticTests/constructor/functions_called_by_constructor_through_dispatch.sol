@@ -25,6 +25,5 @@ contract Test {
     }
 }
 // ====
-// bytecodeFormat: legacy,>=EOFv1
 // ----
 // getName() -> "def\x00\x00\x00"
